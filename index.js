@@ -51,20 +51,19 @@ async function queryDialogflow(text, sessionId) {
     const projectId = process.env.DIALOGFLOW_PROJECT_ID;
     const sessionPath = sessionClient.projectAgentSessionPath(projectId, sessionId);
 
-    const request = {
+    const [response] = await sessionClient.detectIntent({
       session: sessionPath,
-      queryInput: {
-        text: { text, languageCode: 'th' }
-      }
-    };
+      queryInput: { text: { text, languageCode: 'th' } }
+    });
 
-    const [response] = await sessionClient.detectIntent(request);
     const result = response.queryResult;
-    return result.fulfillmentText || 'ขอโทษค่ะ ไม่เข้าใจคำถาม ลองถามใหม่อีกครั้งนะคะ 😊';
-
+    return {
+      text: result.fulfillmentText || 'ขอโทษค่ะ ไม่เข้าใจคำถาม ลองถามใหม่อีกครั้งนะคะ 😊',
+      intent: result.intent ? result.intent.displayName : ''
+    };
   } catch (err) {
     console.error('Dialogflow error:', err.message);
-    return 'ขออภัยค่ะ ระบบขัดข้องชั่วคราว กรุณาลองใหม่อีกครั้งนะคะ';
+    return { text: 'ขออภัยค่ะ ระบบขัดข้องชั่วคราว', intent: '' };
   }
 }
 
