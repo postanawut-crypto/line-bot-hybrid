@@ -11,9 +11,25 @@ const lineConfig = {
 
 const client = new line.Client(lineConfig);
 
-// เก็บ User ที่อยู่ใน Manual Mode
-const manualModeUsers = new Set();
+// ====== MANUAL MODE ======
+const manualModeUsers = new Map(); // userId → เวลาหมดอายุ
+const MANUAL_DURATION = 60 * 60 * 1000; // 1 ชั่วโมง
 
+function isManualMode(userId) {
+  if (!manualModeUsers.has(userId)) return false;
+  const expireTime = manualModeUsers.get(userId);
+  if (Date.now() > expireTime) {
+    manualModeUsers.delete(userId); // หมดเวลาแล้ว ลบออก
+    return false;
+  }
+  return true;
+}
+
+function setManualMode(userId) {
+  manualModeUsers.set(userId, Date.now() + MANUAL_DURATION);
+}
+
+// ====== WEBHOOK ======
 app.post('/webhook', line.middleware(lineConfig), async (req, res) => {
   res.sendStatus(200);
   const events = req.body.events;
@@ -24,55 +40,38 @@ app.post('/webhook', line.middleware(lineConfig), async (req, res) => {
   }
 });
 
+// ====== LOGIC หลัก ======
 async function handleMessage(event) {
   const userText = event.message.text.trim();
   const userId = event.source.userId;
 
-  // ====== คำสั่งสำหรับแอดมิน (ส่งผ่าน OA เอง) ======
-  // พิมพ์ "/manual @UserID" เพื่อเปิด Manual Mode
-  // พิมพ์ "/auto @UserID" เพื่อปิด Manual Mode
-  if (userText.startsWith('/manual ')) {
-    const targetId = userText.replace('/manual ', '').trim();
-    manualModeUsers.add(targetId);
-    await client.replyMessage(event.replyToken, {
-      type: 'text',
-      text: `✅ เปิด Manual Mode สำหรับ ${targetId} แล้ว\nบอทจะไม่ตอบ User นี้อัตโนมัติ`
-    });
-    return;
-  }
-
-  if (userText.startsWith('/auto ')) {
-    const targetId = userText.replace('/auto ', '').trim();
-    manualModeUsers.delete(targetId);
-    await client.replyMessage(event.replyToken, {
-      type: 'text',
-      text: `✅ ปิด Manual Mode สำหรับ ${targetId} แล้ว\nบอทจะตอบอัตโนมัติตามปกติ`
-    });
-    return;
-  }
-
   // ====== ถ้า User อยู่ใน Manual Mode → บอทไม่ตอบ ======
-  if (manualModeUsers.has(userId)) {
+  if (isManualMode(userId)) {
     return;
   }
 
-  // ====== Logic ปกติ ======
+  // ====== ตรวจจับคำว่า "จองโต๊ะ" ======
   if (userText.includes('จองโต๊ะ')) {
-    // เปิด Manual Mode ให้ User นี้อัตโนมัติ
-    manualModeUsers.add(userId);
+    // เปิด Manual Mode 1 ชม. อัตโนมัติ
+    setManualMode(userId);
 
+    // ตอบลูกค้า
     await client.replyMessage(event.replyToken, {
       type: 'text',
       text: '📋 ขอบคุณที่สนใจจองโต๊ะนะคะ!\nทีมงานจะติดต่อกลับภายใน 5 นาทีเพื่อยืนยันการจองค่ะ 🙏'
     });
+
+    // แจ้งเตือนกลุ่ม
     await notifyGroup(userId, userText);
 
   } else {
+    // ====== ส่งไป Dialogflow ======
     const messages = await queryDialogflow(userText, userId);
     await client.replyMessage(event.replyToken, messages);
   }
 }
 
+// ====== DIALOGFLOW ======
 async function queryDialogflow(text, sessionId) {
   try {
     const credentials = JSON.parse(process.env.GOOGLE_CREDENTIALS_JSON);
@@ -88,10 +87,13 @@ async function queryDialogflow(text, sessionId) {
     const result = response.queryResult;
     const messages = [];
 
+    // วนดู fulfillmentMessages ทั้งหมด
     for (const msg of result.fulfillmentMessages) {
+      // ข้อความปกติ
       if (msg.text && msg.text.text && msg.text.text[0]) {
         messages.push({ type: 'text', text: msg.text.text[0] });
       }
+      // Custom Payload (รูปภาพ ฯลฯ)
       if (msg.payload) {
         const payload = msg.payload.fields?.line?.structValue?.fields;
         if (payload) {
@@ -107,6 +109,7 @@ async function queryDialogflow(text, sessionId) {
       }
     }
 
+    // ถ้าไม่มีอะไรเลย ใช้ fulfillmentText
     if (messages.length === 0) {
       messages.push({
         type: 'text',
@@ -122,11 +125,13 @@ async function queryDialogflow(text, sessionId) {
   }
 }
 
+// ====== แจ้งเตือนกลุ่ม ======
 async function notifyGroup(userId, userText) {
   try {
     const groupId = process.env.ADMIN_GROUP_ID;
     const time = new Date().toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' });
 
+    // ดึงชื่อจาก LINE
     let displayName = 'ไม่ทราบชื่อ';
     try {
       const profile = await client.getProfile(userId);
@@ -137,13 +142,14 @@ async function notifyGroup(userId, userText) {
 
     await client.pushMessage(groupId, {
       type: 'text',
-      text: `🔔 มีลูกค้าต้องการจองโต๊ะ!\n👤 ชื่อ: ${displayName}\n💬 ข้อความ: "${userText}"\n⏰ เวลา: ${time}\n\n🆔 User ID: ${userId}\n\n👉 พิมพ์ /auto ${userId}\nเมื่อคุยเสร็จแล้ว เพื่อให้บอทกลับมาตอบอัตโนมัติ`
+      text: `🔔 มีลูกค้าต้องการจองโต๊ะ!\n👤 ชื่อ: ${displayName}\n💬 ข้อความ: "${userText}"\n⏰ เวลา: ${time}\n\n⏳ บอทจะไม่ตอบแชทนี้อีก 1 ชั่วโมง\n👉 เข้า LINE OA เพื่อตอบกลับด้วยตัวเองได้เลยค่ะ`
     });
   } catch (err) {
     console.error('notify error:', err.message);
   }
 }
 
+// ====== START SERVER ======
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
