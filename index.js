@@ -13,7 +13,7 @@ const client = new line.Client(lineConfig);
 
 // ====== MANUAL MODE ======
 const manualModeUsers = new Map(); // userId → เวลาหมดอายุ
-const MANUAL_DURATION = 60 * 60 * 1000; // 1 ชั่วโมง
+const MANUAL_DURATION = 30 * 60 * 1000; // 30 นาที
 
 function isManualMode(userId) {
   if (!manualModeUsers.has(userId)) return false;
@@ -142,7 +142,7 @@ async function notifyGroup(userId, userText) {
 
     await client.pushMessage(groupId, {
       type: 'text',
-      text: `🔔 มีลูกค้าต้องการจองโต๊ะ!\n👤 ชื่อ: ${displayName}\n💬 ข้อความ: "${userText}"\n⏰ เวลา: ${time}\n\n⏳ บอทจะไม่ตอบแชทนี้อีก 1 ชั่วโมง\n👉 เข้า LINE OA เพื่อตอบกลับด้วยตัวเองได้เลยค่ะ`
+      text: `🔔 มีลูกค้าต้องการจองโต๊ะ!\n👤 ชื่อ: ${displayName}\n💬 ข้อความ: "${userText}"\n⏰ เวลา: ${time}\n\n⏳ บอทจะไม่ตอบแชทนี้อีก 30 นาที\n👉 เข้า LINE OA เพื่อตอบกลับด้วยตัวเองได้เลยค่ะ`
     });
   } catch (err) {
     console.error('notify error:', err.message);
