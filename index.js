@@ -74,9 +74,18 @@ async function notifyGroup(userId, userText) {
     const groupId = process.env.ADMIN_GROUP_ID;
     const time = new Date().toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' });
 
+    // ดึงชื่อผู้ใช้จาก LINE
+    let displayName = userId; // default ถ้าดึงไม่ได้
+    try {
+      const profile = await client.getProfile(userId);
+      displayName = profile.displayName;
+    } catch (e) {
+      console.error('getProfile error:', e.message);
+    }
+
     await client.pushMessage(groupId, {
       type: 'text',
-      text: `🔔 มีลูกค้าต้องการจองโต๊ะ!\n👤 User ID: ${userId}\n💬 ข้อความ: "${userText}"\n⏰ เวลา: ${time}\n\n👉 เข้า LINE OA เพื่อตอบกลับด้วยตัวเองได้เลยค่ะ`
+      text: `🔔 มีลูกค้าต้องการจองโต๊ะ!\n👤 ชื่อ: ${displayName}\n💬 ข้อความ: "${userText}"\n⏰ เวลา: ${time}\n\n👉 เข้า LINE OA เพื่อตอบกลับด้วยตัวเองได้เลยค่ะ`
     });
   } catch (err) {
     console.error('notify error:', err.message);
