@@ -1,6 +1,6 @@
 const express = require('express');
 const line = require('@line/bot-sdk');
-const axios = require('axios');
+const { SessionsClient } = require('@google-cloud/dialogflow');
 
 const app = express();
 
@@ -27,24 +27,48 @@ async function handleMessage(event) {
   const userId = event.source.userId;
 
   if (userText.includes('จองโต๊ะ')) {
-    // ตอบลูกค้า
     await client.replyMessage(event.replyToken, {
       type: 'text',
       text: '📋 ขอบคุณที่สนใจจองโต๊ะนะคะ!\nทีมงานจะติดต่อกลับภายใน 5 นาทีเพื่อยืนยันการจองค่ะ 🙏'
     });
-
-    // แจ้งเตือนกลุ่ม
     await notifyGroup(userId, userText);
 
   } else {
-    // ตอบอัตโนมัติ (ยังไม่มี Dialogflow — ตอบ default ก่อน)
+    // ส่งไป Dialogflow
+    const reply = await queryDialogflow(userText, userId);
     await client.replyMessage(event.replyToken, {
       type: 'text',
-      text: 'สวัสดีค่ะ มีอะไรให้ช่วยไหมคะ? 😊'
+      text: reply
     });
   }
 }
 
+// Dialogflow
+async function queryDialogflow(text, sessionId) {
+  try {
+    const credentials = JSON.parse(process.env.GOOGLE_CREDENTIALS_JSON);
+    const sessionClient = new SessionsClient({ credentials });
+    const projectId = process.env.DIALOGFLOW_PROJECT_ID;
+    const sessionPath = sessionClient.projectAgentSessionPath(projectId, sessionId);
+
+    const request = {
+      session: sessionPath,
+      queryInput: {
+        text: { text, languageCode: 'th' }
+      }
+    };
+
+    const [response] = await sessionClient.detectIntent(request);
+    const result = response.queryResult;
+    return result.fulfillmentText || 'ขอโทษค่ะ ไม่เข้าใจคำถาม ลองถามใหม่อีกครั้งนะคะ 😊';
+
+  } catch (err) {
+    console.error('Dialogflow error:', err.message);
+    return 'ขออภัยค่ะ ระบบขัดข้องชั่วคราว กรุณาลองใหม่อีกครั้งนะคะ';
+  }
+}
+
+// แจ้งเตือนกลุ่ม
 async function notifyGroup(userId, userText) {
   try {
     const groupId = process.env.ADMIN_GROUP_ID;
@@ -59,7 +83,6 @@ async function notifyGroup(userId, userText) {
   }
 }
 
-// Start server
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
